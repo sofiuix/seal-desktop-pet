@@ -1,6 +1,12 @@
 const { app, BrowserWindow, screen, ipcMain } = require('electron');
 const path = require('path');
 
+// Prevent multiple instances
+const gotTheLock = app.requestSingleInstanceLock();
+if (!gotTheLock) {
+  app.quit();
+}
+
 let mainWindow;
 
 function createWindow() {

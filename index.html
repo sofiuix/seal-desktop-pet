@@ -20,10 +20,78 @@
       text-shadow: 0 1px 3px rgba(0,0,0,0.3);
       z-index: 100;
     }
+    #achievement-list {
+      position: fixed;
+      top: 38px;
+      right: 20px;
+      pointer-events: none;
+      user-select: none;
+      z-index: 100;
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }
+    .ach-item {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 11px;
+      color: rgba(255,255,255,0.4);
+      text-shadow: 0 1px 2px rgba(0,0,0,0.3);
+      transition: all 0.5s ease;
+    }
+    .ach-item.done {
+      color: #FFD700;
+      text-shadow: 0 0 8px rgba(255,215,0,0.5);
+      text-decoration: line-through;
+    }
+    #achievement-overlay {
+      position: fixed;
+      top: 0; left: 0; right: 0; bottom: 0;
+      display: none;
+      justify-content: center;
+      align-items: center;
+      z-index: 200;
+      pointer-events: none;
+    }
+    #achievement-overlay.show {
+      display: flex;
+    }
+    #achievement-text {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 64px;
+      font-weight: 900;
+      color: #FFD700;
+      text-shadow:
+        0 0 20px rgba(255, 215, 0, 0.8),
+        0 0 40px rgba(255, 165, 0, 0.6),
+        0 0 80px rgba(255, 100, 0, 0.4),
+        0 4px 8px rgba(0,0,0,0.5);
+      opacity: 0;
+      transform: scale(0.3);
+      animation: none;
+    }
+    #achievement-text.animate {
+      animation: achievePop 3.5s ease-out forwards;
+    }
+    @keyframes achievePop {
+      0% { opacity: 0; transform: scale(0.3) rotate(-10deg); }
+      15% { opacity: 1; transform: scale(1.3) rotate(3deg); }
+      25% { transform: scale(1.0) rotate(0deg); }
+      70% { opacity: 1; transform: scale(1.0); }
+      100% { opacity: 0; transform: scale(1.5); }
+    }
   </style>
 </head>
 <body>
   <div id="fish-counter">🐟 0</div>
+  <div id="achievement-list">
+    <div class="ach-item" data-target="100">🐟 100</div>
+    <div class="ach-item" data-target="250">🌈 250</div>
+    <div class="ach-item" data-target="400">💖 400</div>
+    <div class="ach-item" data-target="500">🏔️ 500</div>
+  </div>
+  <div id="achievement-overlay">
+    <div id="achievement-text">🐟 100 FISH MASTER! 🐟</div>
+  </div>
   <canvas id="canvas"></canvas>
 
   <script type="importmap">
