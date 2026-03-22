@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <title>Seal Pet</title>
+  <style>
+    * { margin: 0; padding: 0; }
+    html, body { overflow: hidden; background: transparent; width: 100%; height: 100%; }
+    canvas { display: block; }
+    #fish-counter {
+      position: fixed;
+      top: 12px;
+      right: 20px;
+      color: #ffffff;
+      font-family: 'Segoe UI', Arial, sans-serif;
+      font-size: 18px;
+      font-weight: bold;
+      pointer-events: none;
+      user-select: none;
+      text-shadow: 0 1px 3px rgba(0,0,0,0.3);
+      z-index: 100;
+    }
+  </style>
+</head>
+<body>
+  <div id="fish-counter">🐟 0</div>
+  <canvas id="canvas"></canvas>
+
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "./node_modules/three/build/three.module.js",
+      "three/addons/": "./node_modules/three/examples/jsm/"
+    }
+  }
+  </script>
+  <script type="module" src="./renderer.js"></script>
+</body>
+</html>

@@ -1,0 +1,73 @@
+name: Build Seal Pet
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build-windows:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm install
+
+      - name: Build Windows
+        run: npx electron-builder --win --dir
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Zip Windows build
+        run: Compress-Archive -Path "dist/win-unpacked/*" -DestinationPath "dist/SealPet-Windows.zip"
+        shell: pwsh
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SealPet-Windows
+          path: dist/SealPet-Windows.zip
+
+  build-macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - run: npm install
+
+      - name: Build macOS
+        run: npx electron-builder --mac --dir
+        env:
+          CSC_IDENTITY_AUTO_DISCOVERY: false
+
+      - name: Zip macOS build
+        run: cd dist/mac-arm64 && zip -r ../SealPet-macOS.zip "Seal Pet.app"
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SealPet-macOS
+          path: dist/SealPet-macOS.zip
+
+  release:
+    needs: [build-windows, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/')
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v4
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            SealPet-Windows/SealPet-Windows.zip
+            SealPet-macOS/SealPet-macOS.zip

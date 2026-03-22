@@ -1,0 +1,4 @@
+node_modules/
+dist/
+SealPet-Windows.zip
+*.zip

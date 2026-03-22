@@ -1,0 +1,48 @@
+{
+  "name": "seal-desktop-pet",
+  "version": "1.0.0",
+  "description": "Transparent 3D seal desktop pet widget",
+  "main": "main.js",
+  "scripts": {
+    "start": "electron .",
+    "build:win": "electron-builder --win",
+    "build:mac": "electron-builder --mac",
+    "build": "electron-builder --win --mac"
+  },
+  "build": {
+    "appId": "com.seal.desktoppet",
+    "productName": "Seal Pet",
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html",
+      "renderer.js",
+      "assets/**/*",
+      "node_modules/three/**/*",
+      "node_modules/gsap/**/*"
+    ],
+    "win": {
+      "target": "dir",
+      "icon": null,
+      "signAndEditExecutable": false,
+      "sign": false
+    },
+    "forceCodeSigning": false,
+    "mac": {
+      "target": "dmg",
+      "icon": null
+    },
+    "nsis": {
+      "oneClick": true,
+      "allowToChangeInstallationDirectory": false
+    }
+  },
+  "dependencies": {
+    "three": "^0.160.0",
+    "gsap": "^3.12.0"
+  },
+  "devDependencies": {
+    "electron": "^28.0.0",
+    "electron-builder": "^24.0.0"
+  }
+}
