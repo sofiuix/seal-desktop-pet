@@ -107,6 +107,8 @@ let isRainbowMode = false;
 let armyTriggered = false;
 const miniSeals = [];
 let megaTriggered = false;
+let cosmicTriggered = false;
+let isCosmicMode = false;
 const fishCounterEl = document.getElementById('fish-counter');
 const achievementOverlay = document.getElementById('achievement-overlay');
 const achievementText = document.getElementById('achievement-text');
@@ -466,6 +468,175 @@ function triggerMega() {
   }, 6000);
 }
 
+// ─── Achievement 1000: Seal Family ───────────────────────────────────────────
+const cosmicMiniSeals = [];
+const cosmicHearts = [];
+
+function createHeart(color) {
+  const shape = new THREE.Shape();
+  const s = 1.5;
+  shape.moveTo(0, s * 1.5);
+  shape.bezierCurveTo(s * 0.5, s * 2.5, s * 2, s * 2, s * 2, s * 0.8);
+  shape.bezierCurveTo(s * 2, 0, 0, -s * 0.5, 0, -s * 1.5);
+  shape.bezierCurveTo(0, -s * 0.5, -s * 2, 0, -s * 2, s * 0.8);
+  shape.bezierCurveTo(-s * 2, s * 2, -s * 0.5, s * 2.5, 0, s * 1.5);
+  const geo = new THREE.ShapeGeometry(shape);
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
+  return new THREE.Mesh(geo, mat);
+}
+
+function triggerCosmic() {
+  cosmicTriggered = true;
+  isCosmicMode = true;
+  markAchDone(1000);
+
+  achievementText.textContent = '❤️ SEAL FAMILY ❤️';
+  achievementOverlay.classList.add('show');
+  achievementText.classList.remove('animate');
+  void achievementText.offsetWidth;
+  achievementText.classList.add('animate');
+
+  // Hide army mini seals from achievement 400
+  for (const ms of miniSeals) {
+    const mesh = ms.mesh || ms;
+    gsap.to(mesh.scale, { x: 0, y: 0, z: 0, duration: 0.5, ease: 'back.in(2)',
+      onComplete: () => { scene.remove(mesh); }
+    });
+  }
+  miniSeals.length = 0;
+
+  // Epic fireworks — 6 waves
+  for (let wave = 0; wave < 6; wave++) {
+    setTimeout(() => {
+      for (let i = 0; i < 10; i++) {
+        setTimeout(() => {
+          launchFirework(new THREE.Vector3(
+            (Math.random() - 0.5) * 400,
+            (Math.random() - 0.5) * 300, 0
+          ));
+        }, i * 120);
+      }
+    }, wave * 900);
+  }
+
+  setTimeout(() => {
+    achievementOverlay.classList.remove('show');
+    achievementText.classList.remove('animate');
+  }, 6000);
+
+  // Spawn 15 mini seals using real GLTF model
+  const familyLoader = new GLTFLoader();
+  for (let i = 0; i < 15; i++) {
+    setTimeout(() => {
+      familyLoader.load('./assets/scene.gltf', (gltf) => {
+        const mini = new THREE.Group();
+        const babyModel = gltf.scene;
+        babyModel.scale.set(0.13, 0.13, 0.13); // same as army achievement
+        babyModel.rotation.y = Math.PI; // face same direction as parent
+
+        // Make each mini seal a different rainbow color
+        const hue = i / 15;
+        const rainbowColor = new THREE.Color().setHSL(hue, 0.8, 0.6);
+        babyModel.traverse((child) => {
+          if (child.isMesh && child.material) {
+            child.material = child.material.clone();
+            child.material.color.copy(rainbowColor);
+            child.material.emissive = rainbowColor.clone().multiplyScalar(0.3);
+            child.material.emissiveIntensity = 0.5;
+            child.material.needsUpdate = true;
+          }
+        });
+        mini._hueOffset = hue;
+
+        mini.add(babyModel);
+
+        mini.position.copy(sealModel.position);
+        const row = Math.floor(i / 5);
+        const col = (i % 5) - 2;
+        mini._offsetX = col * 25 + (Math.random() - 0.5) * 8;
+        mini._offsetY = -(row + 1) * 22 + (Math.random() - 0.5) * 5;
+        mini._phase = Math.random() * Math.PI * 2;
+        mini.scale.set(0.01, 0.01, 0.01);
+        scene.add(mini);
+        cosmicMiniSeals.push(mini);
+
+        // Setup animation
+        if (gltf.animations.length > 0) {
+          mini._mixer = new THREE.AnimationMixer(babyModel);
+          const idleClip = gltf.animations.find(c => c.name === 'idle');
+          if (idleClip) {
+            const action = mini._mixer.clipAction(idleClip);
+            action.play();
+          }
+        }
+
+        // Pop in
+        gsap.to(mini.scale, {
+          x: 1, y: 1, z: 1,
+          duration: 0.5,
+          ease: 'elastic.out(1, 0.5)',
+        });
+
+        // Add 2 hearts per mini seal
+        for (let h = 0; h < 2; h++) {
+          const colors = [0xff4466, 0xff6699, 0xff88aa, 0xff3355];
+          const heart = createHeart(colors[Math.floor(Math.random() * colors.length)]);
+          heart._parent = mini;
+          heart._orbitSpeed = 1.5 + Math.random() * 1.5;
+          heart._orbitRadius = 12 + Math.random() * 6;
+          heart._orbitOffset = h * Math.PI + Math.random();
+          heart._bobSpeed = 2 + Math.random();
+          heart.scale.set(0.5, 0.5, 0.5);
+          scene.add(heart);
+          cosmicHearts.push(heart);
+        }
+      });
+    }, i * 300);
+  }
+
+  // Counter style
+  fishCounterEl.style.fontSize = '22px';
+  fishCounterEl.style.color = '#ff6699';
+  fishCounterEl.style.textShadow = '0 0 10px #ff4466, 0 0 20px #ff88aa';
+}
+
+function updateCosmic(time) {
+  if (!isCosmicMode) return;
+
+  // Mini seals follow main seal in formation
+  for (const mini of cosmicMiniSeals) {
+    const targetX = sealModel.position.x + mini._offsetX + Math.sin(time * 0.8 + mini._phase) * 5;
+    const targetY = sealModel.position.y + mini._offsetY + Math.cos(time * 0.6 + mini._phase) * 3;
+    mini.position.x += (targetX - mini.position.x) * 0.04;
+    mini.position.y += (targetY - mini.position.y) * 0.04;
+    mini.quaternion.slerp(sealModel.quaternion, 0.03);
+    if (mini._mixer) mini._mixer.update(0.016);
+    // Cycle rainbow colors
+    if (mini._hueOffset !== undefined) {
+      const h = (mini._hueOffset + time * 0.15) % 1;
+      mini.traverse((child) => {
+        if (child.isMesh && child.material && child.material.color) {
+          child.material.color.setHSL(h, 0.8, 0.6);
+          child.material.emissive.setHSL(h, 0.8, 0.2);
+        }
+      });
+    }
+  }
+
+  // Hearts orbit around their parent mini seals
+  for (const heart of cosmicHearts) {
+    if (!heart._parent) continue;
+    const p = heart._parent.position;
+    heart.position.x = p.x + Math.cos(time * heart._orbitSpeed + heart._orbitOffset) * heart._orbitRadius;
+    heart.position.y = p.y + Math.sin(time * heart._bobSpeed) * 3 + 8;
+    heart.position.z = p.z + Math.sin(time * heart._orbitSpeed + heart._orbitOffset) * heart._orbitRadius;
+    heart.rotation.y = time * 2;
+    // Pulse scale
+    const s = 0.4 + Math.sin(time * 3 + heart._orbitOffset) * 0.1;
+    heart.scale.set(s, s, s);
+  }
+}
+
 const loader = new GLTFLoader();
 loader.load('./assets/scene.gltf', (gltf) => {
   const rawModel = gltf.scene;
@@ -724,20 +895,21 @@ function eatCookie(index) {
   if (fishEaten === 100 && !achievementTriggered) {
     triggerAchievement();
   }
-
   // Achievement at 250 fish — LEGENDARY RAINBOW!
   if (fishEaten === 250 && !legendaryTriggered) {
     triggerLegendary();
   }
-
   // Achievement at 400 fish — SEAL ARMY!
   if (fishEaten === 400 && !armyTriggered) {
     triggerArmy();
   }
-
   // Achievement at 500 fish — MEGA SEAL!
   if (fishEaten === 500 && !megaTriggered) {
     triggerMega();
+  }
+  // Achievement at 1000 fish — SEAL FAMILY!
+  if (fishEaten === 1000 && !cosmicTriggered) {
+    triggerCosmic();
   }
 
   // Instant bite — crumbs fly immediately
@@ -751,20 +923,29 @@ function eatCookie(index) {
     onComplete: () => { cookie.visible = false; },
   });
 
-  // Quick nose dip (bite nod)
-  const originalRotX = sealModel.rotation.x;
-  gsap.to(sealModel.rotation, {
-    x: originalRotX + 0.4,
-    duration: 0.12,
-    ease: 'power2.in',
-    onComplete: () => {
-      gsap.to(sealModel.rotation, {
-        x: originalRotX,
-        duration: 0.25,
-        ease: 'power2.out',
+  // Bite squeeze effect (no rotation conflict)
+  if (!sealModel._isBiting) {
+    sealModel._isBiting = true;
+    const raw = sealModel.children[0];
+    if (raw) {
+      const origScale = raw.scale.x;
+      gsap.to(raw.scale, {
+        x: origScale * 1.15, y: origScale * 0.85, z: origScale * 1.15,
+        duration: 0.1,
+        ease: 'power2.in',
+        onComplete: () => {
+          gsap.to(raw.scale, {
+            x: origScale, y: origScale, z: origScale,
+            duration: 0.2,
+            ease: 'elastic.out(1, 0.5)',
+            onComplete: () => { sealModel._isBiting = false; },
+          });
+        },
       });
-    },
-  });
+    } else {
+      sealModel._isBiting = false;
+    }
+  }
 
   // Happy bounce
   gsap.to(sealModel.position, {
@@ -814,20 +995,52 @@ document.addEventListener('click', (e) => {
   const cm = new THREE.Vector2((e.clientX / W) * 2 - 1, -(e.clientY / H) * 2 + 1);
   raycaster.setFromCamera(cm, camera);
   if (raycaster.intersectObject(sealModel, true).length > 0) {
-    gsap.to(sealModel.rotation, {
-      x: sealModel.rotation.x + Math.PI * 2,
-      duration: 0.8,
-      ease: 'power2.inOut',
-    });
+    // Flip via scale bounce instead of rotation (avoids quaternion conflict)
+    const raw = sealModel.children[0];
+    if (raw) {
+      const s = raw.scale.x;
+      gsap.to(raw.scale, {
+        y: s * 0.3, duration: 0.2, ease: 'power2.in',
+        onComplete: () => {
+          gsap.to(raw.scale, { y: s, duration: 0.5, ease: 'elastic.out(1, 0.4)' });
+        },
+      });
+    }
   }
 });
+
+let isBarrelRolling = false;
+
+// ─── Periodic Jump ───────────────────────────────────────────────────────────
+let lastJumpTime = 0;
+let isJumping = false;
+const JUMP_INTERVAL = 4000; // 4 seconds
+
+function tryPeriodicJump() {
+  const now = Date.now();
+  if (mouseMoving && !isJumping && !isBonking && now - lastJumpTime > JUMP_INTERVAL) {
+    isJumping = true;
+    lastJumpTime = now;
+    crossFadeTo('jump', 0.3);
+
+    // Get jump animation duration or default to 2 seconds
+    const jumpClip = animations['jump'] ? animations['jump'].getClip() : null;
+    const jumpDuration = jumpClip ? jumpClip.duration * 1000 : 2000;
+
+    setTimeout(() => {
+      isJumping = false;
+      if (mouseMoving) crossFadeTo('idle', 0.3);
+    }, jumpDuration);
+  }
+}
 
 // ─── Movement ────────────────────────────────────────────────────────────────
 function updateSealMovement() {
   if (!sealModel || isBonking) return;
 
   if (mouseMoving) {
-    if (currentAction !== animations['jump']) crossFadeTo('jump', 0.3);
+    tryPeriodicJump();
+    if (!isJumping && (currentAction !== animations['idle'] || currentAction.paused)) crossFadeTo('idle', 0.3);
 
     // Smooth lerp toward cursor (70% of the way)
     const targetX = mouseWorld.x;
@@ -847,21 +1060,27 @@ function updateSealMovement() {
     const dist = Math.sqrt(dx * dx + dy * dy);
 
     if (dist > 1) {
-      const angle = Math.atan2(dx, dy); // horizontal direction
-      const verticalRatio = dy / Math.max(dist, 1);
+      const angle = Math.atan2(dx, dy);
 
-      // Build target quaternion from separate axis rotations
-      const qY = new THREE.Quaternion().setFromAxisAngle(
-        new THREE.Vector3(0, 1, 0), -angle
-      );
-      const qX = new THREE.Quaternion().setFromAxisAngle(
-        new THREE.Vector3(1, 0, 0), verticalRatio * Math.PI / 2
-      );
-      // Apply Y first, then X in local space
-      const targetQ = new THREE.Quaternion().multiplyQuaternions(qY, qX);
+      // Smooth the target angle to avoid jitter
+      if (!sealModel._smoothAngle) sealModel._smoothAngle = angle;
+      let aDiff = angle - sealModel._smoothAngle;
+      while (aDiff > Math.PI) aDiff -= Math.PI * 2;
+      while (aDiff < -Math.PI) aDiff += Math.PI * 2;
+      sealModel._smoothAngle += aDiff * 0.35;
 
-      // Smooth slerp toward target (0.15 = responsive but smooth)
-      sealModel.quaternion.slerp(targetQ, 0.15);
+      // Smooth vertical angle — responsive but no jitter
+      // 180° vertical range — full up/down rotation
+      const verticalAngle = Math.atan2(dy, Math.abs(dx) + 0.01);
+      if (!sealModel._smoothVertical) sealModel._smoothVertical = 0;
+      sealModel._smoothVertical += (verticalAngle - sealModel._smoothVertical) * 0.2;
+
+      // Build target quaternion from smoothed values
+      const euler = new THREE.Euler(sealModel._smoothVertical, -sealModel._smoothAngle, 0, 'YXZ');
+      const targetQ = new THREE.Quaternion().setFromEuler(euler);
+
+      // Responsive slerp — follows mouse closely
+      sealModel.quaternion.slerp(targetQ, 0.25);
     }
   } else {
     playStaticPose();
@@ -878,6 +1097,7 @@ function animate() {
   checkCollisions();
   updateRainbow(elapsed);
   updateMiniSeals(elapsed);
+  updateCosmic(elapsed);
   renderer.render(scene, camera);
 }
 
