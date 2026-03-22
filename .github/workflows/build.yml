@@ -48,8 +48,11 @@ jobs:
         env:
           CSC_IDENTITY_AUTO_DISCOVERY: false
 
+      - name: Copy installer script
+        run: cp install-macos.sh dist/mac-arm64/
+
       - name: Zip macOS build
-        run: cd dist/mac-arm64 && zip -r ../SealPet-macOS.zip "Seal Pet.app"
+        run: cd dist/mac-arm64 && zip -r ../SealPet-macOS.zip "Seal Pet.app" install-macos.sh
 
       - uses: actions/upload-artifact@v4
         with:
