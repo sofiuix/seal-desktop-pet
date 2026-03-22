@@ -15,7 +15,8 @@ camera.lookAt(0, 0, 0);
 
 const renderer = new THREE.WebGLRenderer({ canvas, alpha: true, antialias: true });
 renderer.setSize(W, H);
-renderer.setPixelRatio(window.devicePixelRatio);
+// Cap pixel ratio to 1 for performance (transparent desktop pet doesn't need retina)
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1));
 renderer.setClearColor(0x000000, 0);
 
 // Lighting
@@ -48,6 +49,9 @@ const raycaster = new THREE.Raycaster();
 const mouse = new THREE.Vector2();
 const mouseWorld = new THREE.Vector3();
 
+// Reuse plane object for raycasting (avoid creating each mousemove)
+const _rayPlane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
+
 let cursorX = W / 2;
 let cursorY = H / 2;
 let mouseMoving = false;
@@ -64,10 +68,9 @@ document.addEventListener('mousemove', (e) => {
   clearTimeout(mouseTimer);
   mouseTimer = setTimeout(() => { mouseMoving = false; }, 300);
 
-  // Screen → world on Z=0 plane
+  // Screen → world on Z=0 plane (reuse _rayPlane)
   raycaster.setFromCamera(mouse, camera);
-  const plane = new THREE.Plane(new THREE.Vector3(0, 0, 1), 0);
-  raycaster.ray.intersectPlane(plane, mouseWorld);
+  raycaster.ray.intersectPlane(_rayPlane, mouseWorld);
 
   // Click-through logic
   if (sealModel) {
@@ -113,19 +116,114 @@ const fishCounterEl = document.getElementById('fish-counter');
 const achievementOverlay = document.getElementById('achievement-overlay');
 const achievementText = document.getElementById('achievement-text');
 
+// ─── Shared Geometries & Materials (reuse instead of creating per-object) ───
+// Firework spark: use a single low-poly sphere geometry for all sparks
+const _sparkGeo = new THREE.SphereGeometry(1, 4, 4);
+const _sparkColors = [0xFFD700, 0xFF4500, 0x00FF88, 0xFF1493, 0x00BFFF, 0xFF6347, 0x7B68EE, 0xFFFF00];
+
+// Crumb: single shared tetrahedron geometry (unit size, scaled per instance)
+const _crumbGeo = new THREE.TetrahedronGeometry(1, 0);
+const _crumbColors = [0x4a90d9, 0x3a7bc8, 0x6baaf0, 0xb0d4f1];
+
+// Fish shared geometries (created once, used for all 20 fish)
+const S_FISH = 0.9;
+const _fishBodyGeo = (() => {
+  const g = new THREE.SphereGeometry(6 * S_FISH, 10, 6);
+  g.scale(1.8, 0.6, 1);
+  return g;
+})();
+const _fishBellyGeo = (() => {
+  const g = new THREE.SphereGeometry(5.5 * S_FISH, 8, 5);
+  g.scale(1.6, 0.35, 0.9);
+  return g;
+})();
+const _fishTailGeo = new THREE.ConeGeometry(4 * S_FISH, 6 * S_FISH, 4);
+const _fishFinGeo = new THREE.ConeGeometry(2.5 * S_FISH, 4 * S_FISH, 4);
+const _fishEyeGeo = new THREE.SphereGeometry(1.2 * S_FISH, 5, 5);
+
+// Fish shared materials (each fish gets the same material instances)
+const _fishBodyMat = new THREE.MeshStandardMaterial({ color: 0x4a90d9, roughness: 0.5, metalness: 0.1, transparent: true });
+const _fishBellyMat = new THREE.MeshStandardMaterial({ color: 0xb0d4f1, transparent: true });
+const _fishTailMat = new THREE.MeshStandardMaterial({ color: 0x3a7bc8, transparent: true });
+const _fishFinMat = new THREE.MeshStandardMaterial({ color: 0x3a7bc8, transparent: true });
+const _fishEyeMat = new THREE.MeshStandardMaterial({ color: 0x111111, transparent: true });
+
+// Heart shared geometry (for cosmic achievement)
+const _heartShape = (() => {
+  const shape = new THREE.Shape();
+  const s = 1.5;
+  shape.moveTo(0, s * 1.5);
+  shape.bezierCurveTo(s * 0.5, s * 2.5, s * 2, s * 2, s * 2, s * 0.8);
+  shape.bezierCurveTo(s * 2, 0, 0, -s * 0.5, 0, -s * 1.5);
+  shape.bezierCurveTo(0, -s * 0.5, -s * 2, 0, -s * 2, s * 0.8);
+  shape.bezierCurveTo(-s * 2, s * 2, -s * 0.5, s * 2.5, 0, s * 1.5);
+  return shape;
+})();
+const _heartGeo = new THREE.ShapeGeometry(_heartShape);
+
+// Reusable temp objects for hot-path calculations
+const _tempColor = new THREE.Color();
+const _tempEuler = new THREE.Euler(0, 0, 0, 'YXZ');
+const _tempQuat = new THREE.Quaternion();
+
+// ─── Object Pool for Sparks and Crumbs ──────────────────────────────────────
+class MeshPool {
+  constructor(geometry, createMaterial, maxSize = 80) {
+    this._geo = geometry;
+    this._createMat = createMaterial;
+    this._pool = [];
+    this._maxSize = maxSize;
+  }
+  acquire() {
+    if (this._pool.length > 0) {
+      const mesh = this._pool.pop();
+      mesh.visible = true;
+      mesh.scale.set(1, 1, 1);
+      mesh.material.opacity = 1;
+      return mesh;
+    }
+    const mat = this._createMat();
+    const mesh = new THREE.Mesh(this._geo, mat);
+    return mesh;
+  }
+  release(mesh) {
+    scene.remove(mesh);
+    mesh.visible = false;
+    if (this._pool.length < this._maxSize) {
+      this._pool.push(mesh);
+    } else {
+      // Over capacity — dispose material only (geometry is shared)
+      mesh.material.dispose();
+    }
+  }
+}
+
+const sparkPool = new MeshPool(
+  _sparkGeo,
+  () => new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 1 }),
+  120
+);
+
+const crumbPool = new MeshPool(
+  _crumbGeo,
+  () => new THREE.MeshStandardMaterial({ color: 0x4a90d9 }),
+  40
+);
+
 // ─── Achievement: Fireworks ─────────────────────────────────────────────────
 const fireworkParticles = [];
 
 function launchFirework(origin) {
-  const colors = [0xFFD700, 0xFF4500, 0x00FF88, 0xFF1493, 0x00BFFF, 0xFF6347, 0x7B68EE, 0xFFFF00];
   const count = 30 + Math.floor(Math.random() * 20);
 
   for (let i = 0; i < count; i++) {
-    const color = colors[Math.floor(Math.random() * colors.length)];
+    const color = _sparkColors[Math.floor(Math.random() * _sparkColors.length)];
     const size = 1 + Math.random() * 3;
-    const geo = new THREE.SphereGeometry(size, 6, 6);
-    const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 1 });
-    const spark = new THREE.Mesh(geo, mat);
+
+    const spark = sparkPool.acquire();
+    spark.material.color.setHex(color);
+    spark.material.opacity = 1;
+    spark.scale.set(size, size, size);
     spark.position.copy(origin);
     scene.add(spark);
 
@@ -156,22 +254,21 @@ function launchFirework(origin) {
       ease: 'power2.in',
     });
 
-    // Fade out + shrink + cleanup
-    gsap.to(mat, {
+    // Fade out
+    gsap.to(spark.material, {
       opacity: 0,
       duration: dur * 0.8,
       delay: dur * 0.3,
       ease: 'power1.in',
     });
 
+    // Shrink + return to pool
     gsap.to(spark.scale, {
       x: 0, y: 0, z: 0,
       duration: 0.4,
       delay: dur,
       onComplete: () => {
-        scene.remove(spark);
-        geo.dispose();
-        mat.dispose();
+        sparkPool.release(spark);
       },
     });
   }
@@ -279,12 +376,12 @@ function updateRainbow(time) {
   if (!isRainbowMode || !sealModel) return;
 
   const hue = (time * 0.3) % 1; // cycle through hues
-  const rainbowColor = new THREE.Color().setHSL(hue, 1.0, 0.5);
+  _tempColor.setHSL(hue, 1.0, 0.5);
 
   // Cycle seal material emissive color
   sealModel.traverse((child) => {
     if (child.isMesh && child.material) {
-      child.material.emissive = rainbowColor;
+      child.material.emissive.copy(_tempColor);
       child.material.emissiveIntensity = 0.4;
     }
   });
@@ -473,16 +570,9 @@ const cosmicMiniSeals = [];
 const cosmicHearts = [];
 
 function createHeart(color) {
-  const shape = new THREE.Shape();
-  const s = 1.5;
-  shape.moveTo(0, s * 1.5);
-  shape.bezierCurveTo(s * 0.5, s * 2.5, s * 2, s * 2, s * 2, s * 0.8);
-  shape.bezierCurveTo(s * 2, 0, 0, -s * 0.5, 0, -s * 1.5);
-  shape.bezierCurveTo(0, -s * 0.5, -s * 2, 0, -s * 2, s * 0.8);
-  shape.bezierCurveTo(-s * 2, s * 2, -s * 0.5, s * 2.5, 0, s * 1.5);
-  const geo = new THREE.ShapeGeometry(shape);
+  // Reuse shared heart geometry, only create new material per heart
   const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.8, side: THREE.DoubleSide });
-  return new THREE.Mesh(geo, mat);
+  return new THREE.Mesh(_heartGeo, mat);
 }
 
 function triggerCosmic() {
@@ -610,7 +700,7 @@ function updateCosmic(time) {
     mini.position.x += (targetX - mini.position.x) * 0.04;
     mini.position.y += (targetY - mini.position.y) * 0.04;
     mini.quaternion.slerp(sealModel.quaternion, 0.03);
-    if (mini._mixer) mini._mixer.update(0.016);
+    if (mini._mixer) mini._mixer.update(0.033); // fixed step at ~30fps
     // Cycle rainbow colors
     if (mini._hueOffset !== undefined) {
       const h = (mini._hueOffset + time * 0.15) % 1;
@@ -717,45 +807,33 @@ function randomPos() {
 
 function createCookie() {
   const fishGroup = new THREE.Group();
-  const S = 0.9;
 
-  // Body
-  const bodyGeo = new THREE.SphereGeometry(6 * S, 12, 8);
-  bodyGeo.scale(1.8, 0.6, 1);
-  const bodyMat = new THREE.MeshStandardMaterial({ color: 0x4a90d9, roughness: 0.5, metalness: 0.1 });
-  fishGroup.add(new THREE.Mesh(bodyGeo, bodyMat));
+  // Body — reuse shared geometry, clone material for independent opacity control
+  const bodyMesh = new THREE.Mesh(_fishBodyGeo, _fishBodyMat.clone());
+  fishGroup.add(bodyMesh);
 
-  // Belly (lighter underside)
-  const bellyGeo = new THREE.SphereGeometry(5.5 * S, 10, 6);
-  bellyGeo.scale(1.6, 0.35, 0.9);
-  const bellyMat = new THREE.MeshStandardMaterial({ color: 0xb0d4f1 });
-  const belly = new THREE.Mesh(bellyGeo, bellyMat);
-  belly.position.y = -1 * S;
-  fishGroup.add(belly);
+  // Belly
+  const bellyMesh = new THREE.Mesh(_fishBellyGeo, _fishBellyMat.clone());
+  bellyMesh.position.y = -1 * S_FISH;
+  fishGroup.add(bellyMesh);
 
   // Tail fin
-  const tailGeo = new THREE.ConeGeometry(4 * S, 6 * S, 4);
-  const tailMat = new THREE.MeshStandardMaterial({ color: 0x3a7bc8 });
-  const tail = new THREE.Mesh(tailGeo, tailMat);
-  tail.rotation.z = Math.PI / 2;
-  tail.position.x = -12 * S;
-  tail.scale.set(1, 0.4, 1);
-  fishGroup.add(tail);
+  const tailMesh = new THREE.Mesh(_fishTailGeo, _fishTailMat.clone());
+  tailMesh.rotation.z = Math.PI / 2;
+  tailMesh.position.x = -12 * S_FISH;
+  tailMesh.scale.set(1, 0.4, 1);
+  fishGroup.add(tailMesh);
 
   // Dorsal fin
-  const finGeo = new THREE.ConeGeometry(2.5 * S, 4 * S, 4);
-  const dorsal = new THREE.Mesh(finGeo, new THREE.MeshStandardMaterial({ color: 0x3a7bc8 }));
-  dorsal.position.set(0, 4 * S, 0);
-  dorsal.scale.set(0.6, 1, 0.3);
-  fishGroup.add(dorsal);
+  const dorsalMesh = new THREE.Mesh(_fishFinGeo, _fishFinMat.clone());
+  dorsalMesh.position.set(0, 4 * S_FISH, 0);
+  dorsalMesh.scale.set(0.6, 1, 0.3);
+  fishGroup.add(dorsalMesh);
 
   // Eye
-  const eye = new THREE.Mesh(
-    new THREE.SphereGeometry(1.2 * S, 6, 6),
-    new THREE.MeshStandardMaterial({ color: 0x111111 })
-  );
-  eye.position.set(7 * S, 1.5 * S, 3 * S);
-  fishGroup.add(eye);
+  const eyeMesh = new THREE.Mesh(_fishEyeGeo, _fishEyeMat.clone());
+  eyeMesh.position.set(7 * S_FISH, 1.5 * S_FISH, 3 * S_FISH);
+  fishGroup.add(eyeMesh);
 
   const mesh = fishGroup;
   mesh.renderOrder = -1;
@@ -840,12 +918,10 @@ function spawnCrumbs(position) {
   const crumbCount = 8;
   for (let i = 0; i < crumbCount; i++) {
     const size = 0.5 + Math.random() * 1.5;
-    // Fish chunks
-    const colors = [0x4a90d9, 0x3a7bc8, 0x6baaf0, 0xb0d4f1];
-    const crumb = new THREE.Mesh(
-      new THREE.TetrahedronGeometry(size, 0),
-      new THREE.MeshStandardMaterial({ color: colors[Math.floor(Math.random() * colors.length)] })
-    );
+
+    const crumb = crumbPool.acquire();
+    crumb.material.color.setHex(_crumbColors[Math.floor(Math.random() * _crumbColors.length)]);
+    crumb.scale.set(size, size, size);
     crumb.rotation.set(Math.random() * Math.PI, Math.random() * Math.PI, Math.random() * Math.PI);
     crumb.position.copy(position);
     scene.add(crumb);
@@ -869,16 +945,14 @@ function spawnCrumbs(position) {
       delay: 0.4,
       ease: 'power2.in',
     });
-    // Fade out and remove
+    // Shrink and return to pool
     gsap.to(crumb.scale, {
       x: 0, y: 0, z: 0,
       duration: 0.3,
       delay: 0.6,
       ease: 'power2.in',
       onComplete: () => {
-        scene.remove(crumb);
-        crumb.geometry.dispose();
-        crumb.material.dispose();
+        crumbPool.release(crumb);
       },
     });
   }
@@ -1070,38 +1144,47 @@ function updateSealMovement() {
       sealModel._smoothAngle += aDiff * 0.35;
 
       // Smooth vertical angle — responsive but no jitter
-      // 180° vertical range — full up/down rotation
       const verticalAngle = Math.atan2(dy, Math.abs(dx) + 0.01);
       if (!sealModel._smoothVertical) sealModel._smoothVertical = 0;
       sealModel._smoothVertical += (verticalAngle - sealModel._smoothVertical) * 0.2;
 
-      // Build target quaternion from smoothed values
-      const euler = new THREE.Euler(sealModel._smoothVertical, -sealModel._smoothAngle, 0, 'YXZ');
-      const targetQ = new THREE.Quaternion().setFromEuler(euler);
+      // Build target quaternion from smoothed values (reuse temp objects)
+      _tempEuler.set(sealModel._smoothVertical, -sealModel._smoothAngle, 0);
+      _tempQuat.setFromEuler(_tempEuler);
 
       // Responsive slerp — follows mouse closely
-      sealModel.quaternion.slerp(targetQ, 0.25);
+      sealModel.quaternion.slerp(_tempQuat, 0.25);
     }
   } else {
     playStaticPose();
   }
 }
 
-// ─── Render Loop ─────────────────────────────────────────────────────────────
-function animate() {
+// ─── Render Loop (throttled to ~30fps) ───────────────────────────────────────
+const TARGET_FPS = 30;
+const FRAME_INTERVAL = 1000 / TARGET_FPS;
+let lastFrameTime = 0;
+
+function animate(timestamp) {
   requestAnimationFrame(animate);
+
+  // Throttle to 30fps
+  const elapsed = timestamp - lastFrameTime;
+  if (elapsed < FRAME_INTERVAL) return;
+  lastFrameTime = timestamp - (elapsed % FRAME_INTERVAL);
+
   const delta = clock.getDelta();
-  const elapsed = clock.elapsedTime;
+  const elapsedTime = clock.elapsedTime;
   if (mixer) mixer.update(delta);
   updateSealMovement();
   checkCollisions();
-  updateRainbow(elapsed);
-  updateMiniSeals(elapsed);
-  updateCosmic(elapsed);
+  updateRainbow(elapsedTime);
+  updateMiniSeals(elapsedTime);
+  updateCosmic(elapsedTime);
   renderer.render(scene, camera);
 }
 
-animate();
+animate(0);
 console.log('Renderer started, canvas:', W, 'x', H);
 
 window.addEventListener('resize', () => {

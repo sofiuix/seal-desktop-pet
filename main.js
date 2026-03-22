@@ -1,6 +1,9 @@
 const { app, BrowserWindow, screen, ipcMain } = require('electron');
 const path = require('path');
 
+// Limit V8 heap to 256MB for lower RAM usage
+app.commandLine.appendSwitch('js-flags', '--max-old-space-size=256');
+
 // Prevent multiple instances
 const gotTheLock = app.requestSingleInstanceLock();
 if (!gotTheLock) {

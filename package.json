@@ -12,6 +12,7 @@
   "build": {
     "appId": "com.seal.desktoppet",
     "productName": "Seal Pet",
+    "asar": true,
     "files": [
       "main.js",
       "preload.js",
@@ -19,7 +20,17 @@
       "renderer.js",
       "assets/**/*",
       "node_modules/three/**/*",
-      "node_modules/gsap/**/*"
+      "node_modules/gsap/**/*",
+      "!**/*.map",
+      "!**/*.ts",
+      "!**/*.md",
+      "!**/LICENSE",
+      "!**/license",
+      "!**/.github",
+      "!**/test",
+      "!**/tests",
+      "!**/docs",
+      "!**/examples"
     ],
     "win": {
       "target": "dir",
